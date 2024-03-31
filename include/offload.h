@@ -13,12 +13,12 @@ class Offloader
 {
 public:
     Offloader(const std::string &filename, unsigned int n_entries, const std::string &backend = "uring");
-    SpaceInfo prepare_write(const at::Tensor &tensor, const std::string &key);
-    SpaceInfo prepare_read(const at::Tensor &tensor, const std::string &key);
-    void async_write(const at::Tensor &tensor, const std::string &key, callback_t callback = nullptr);
-    void async_read(const at::Tensor &tensor, const std::string &key, callback_t callback = nullptr);
-    void sync_write(const at::Tensor &tensor, const std::string &key);
-    void sync_read(const at::Tensor &tensor, const std::string &key);
+    SpaceInfo prepare_write(const ull nbytes, const std::string &key);
+    SpaceInfo prepare_read(const ull nbytes, const std::string &key);
+    void async_write(ull data_ptr, ull nbytes, const std::string &key, callback_t callback = nullptr);
+    void async_read(ull data_ptr, ull nbytes, const std::string &key, callback_t callback = nullptr);
+    void sync_write(ull data_ptr, ull nbytes, const std::string &key);
+    void sync_read(ull data_ptr, ull nbytes, const std::string &key);
     void sync_write_events();
     void sync_read_events();
     void synchronize();

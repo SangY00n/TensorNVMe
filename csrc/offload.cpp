@@ -141,27 +141,27 @@ Offloader::Offloader(const std::string &filename, unsigned int n_entries, const 
 {
     this->aio = create_asyncio(n_entries, backend);
     this->fd = open(filename.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
-    this->aio->register_file(fd);
+    this->aio->register_file(fd); // liburing만 기반 aio인 경우만 register하고, libaio는 안함.
 }
 
-SpaceInfo Offloader::prepare_write(const at::Tensor &tensor, const std::string &key)
+SpaceInfo Offloader::prepare_write(const ull nbytes, const std::string &key)
 {
-    if (!tensor.is_contiguous() || !tensor.is_cpu())
-        throw std::runtime_error("Tensor must be contiguous and on cpu");
-    ull bytes = tensor.storage().nbytes();
+    // if (!tensor.is_contiguous() || !tensor.is_cpu())
+    //     throw std::runtime_error("Tensor must be contiguous and on cpu");
+    ull bytes = nbytes;
     ull offset = this->space_mgr.alloc(bytes);
     SpaceInfo space_info(offset, bytes);
     this->tensors_info[key] = space_info;
     return space_info;
 }
 
-SpaceInfo Offloader::prepare_read(const at::Tensor &tensor, const std::string &key)
+SpaceInfo Offloader::prepare_read(const ull nbytes, const std::string &key)
 {
-    if (!tensor.is_contiguous() || !tensor.is_cpu())
-        throw std::runtime_error("Tensor must be contiguous and on cpu");
+    // if (!tensor.is_contiguous() || !tensor.is_cpu())
+    //     throw std::runtime_error("Tensor must be contiguous and on cpu");
     if (this->tensors_info.find(key) == this->tensors_info.end())
         throw std::runtime_error("Read error, tensor not found");
-    ull bytes = tensor.storage().nbytes();
+    ull bytes = nbytes;
     SpaceInfo space_info = this->tensors_info[key];
     if (bytes != space_info.second)
         throw std::runtime_error("Read error, tensor shape mismatch");
@@ -169,39 +169,47 @@ SpaceInfo Offloader::prepare_read(const at::Tensor &tensor, const std::string &k
     return space_info;
 }
 
-void Offloader::async_write(const at::Tensor &tensor, const std::string &key, callback_t callback)
+void Offloader::async_write(ull data_ptr, ull nbytes, const std::string &key, callback_t callback)
 {
+    void *data_ptr_ = reinterpret_cast<void *>(data_ptr);
     ull offset, bytes;
-    std::tie(offset, bytes) = prepare_write(tensor, key);
-    this->aio->write(this->fd, tensor.data_ptr(), bytes, offset, callback);
+    std::tie(offset, bytes) = prepare_write(nbytes, key);
+    this->aio->write(this->fd, data_ptr_, bytes, offset, callback);
 
     this->aio->get_event(NOWAIT);
 }
 
-void Offloader::async_read(const at::Tensor &tensor, const std::string &key, callback_t callback)
+void Offloader::async_read(ull data_ptr, ull nbytes, const std::string &key, callback_t callback)
 {
+    void *data_ptr_ = reinterpret_cast<void *>(data_ptr);
     ull offset, bytes;
-    std::tie(offset, bytes) = prepare_read(tensor, key);
+    std::tie(offset, bytes) = prepare_read(nbytes, key);
     auto fn = std::bind(&Offloader::release, this, offset, bytes, callback);
-    this->aio->read(this->fd, tensor.data_ptr(), bytes, offset, fn);
+    this->aio->read(this->fd, data_ptr_, bytes, offset, fn);
 
     this->aio->get_event(NOWAIT);
 }
 
-void Offloader::sync_write(const at::Tensor &tensor, const std::string &key)
+void Offloader::sync_write(ull data_ptr, ull nbytes, const std::string &key)
 {
+    // printf("data_ptr: %d\n", data_ptr);
+    void *data_ptr_ = reinterpret_cast<void *>(data_ptr);
+    // printf("data_ptr_: %p\n", data_ptr_);
     ull offset, bytes;
-    std::tie(offset, bytes) = prepare_write(tensor, key);
+    std::tie(offset, bytes) = prepare_write(nbytes, key);
     lseek(this->fd, offset, SEEK_SET);
-    write(this->fd, tensor.data_ptr(), bytes);
+    write(this->fd, data_ptr_, bytes);
 }
 
-void Offloader::sync_read(const at::Tensor &tensor, const std::string &key)
+void Offloader::sync_read(ull data_ptr, ull nbytes, const std::string &key)
 {
+    // printf("data_ptr: %d\n", data_ptr);
+    void *data_ptr_ = reinterpret_cast<void *>(data_ptr);
+    // printf("data_ptr_: %p\n", data_ptr_);
     ull offset, bytes;
-    std::tie(offset, bytes) = prepare_read(tensor, key);
+    std::tie(offset, bytes) = prepare_read(nbytes, key);
     lseek(this->fd, offset, SEEK_SET);
-    read(this->fd, tensor.data_ptr(), bytes);
+    read(this->fd, data_ptr_, bytes);
     release(offset, bytes);
 }
 
@@ -317,10 +325,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
     py::class_<Offloader>(m, "Offloader")
         .def(py::init<const std::string &, unsigned int, const std::string &>(), py::arg("filename"), py::arg("n_entries"), py::arg("backend") = "uring")
-        .def("async_write", &Offloader::async_write, py::arg("tensor"), py::arg("key"), py::arg("callback") = py::none())
-        .def("async_read", &Offloader::async_read, py::arg("tensor"), py::arg("key"), py::arg("callback") = py::none())
-        .def("sync_write", &Offloader::sync_write, py::arg("tensor"), py::arg("key"))
-        .def("sync_read", &Offloader::sync_read, py::arg("tensor"), py::arg("key"))
+        .def("async_write", &Offloader::async_write, py::arg("data_ptr"), py::arg("nbytes"), py::arg("key"), py::arg("callback") = py::none())
+        .def("async_read", &Offloader::async_read, py::arg("data_ptr"), py::arg("nbytes"), py::arg("key"), py::arg("callback") = py::none())
+        .def("sync_write", &Offloader::sync_write, py::arg("data_ptr"), py::arg("nbytes"), py::arg("key"))
+        .def("sync_read", &Offloader::sync_read, py::arg("data_ptr"), py::arg("nbytes"), py::arg("key"))
         .def("sync_write_events", &Offloader::sync_write_events)
         .def("sync_read_events", &Offloader::sync_write_events)
         .def("synchronize", &Offloader::synchronize)
