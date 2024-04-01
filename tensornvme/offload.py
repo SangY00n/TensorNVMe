@@ -1,5 +1,5 @@
 import os
-import torch
+import torch # import 안하면 ImportError: libc10.so: cannot open shared object file: No such file or directory 오류 발생
 import uuid
 from typing import Callable, Optional, List, Dict, Tuple
 from tensornvme._C import Offloader, get_backends
@@ -45,6 +45,7 @@ class DiskOffloader(Offloader):
             filename = os.path.join(dir_name, f'offload-{uuid.uuid4().hex}')
             
         self.array_id_info_dict: Dict[int, ArrayInfo] = {}
+        self.arrays_key_infos_dict: Dict[str, List[ArrayInfo]] = {}
             
         super().__init__(filename, n_entries, backend)
 
@@ -106,36 +107,89 @@ class DiskOffloader(Offloader):
         
         return array
 
-    def async_writev(self, tensors: List[torch.Tensor], callback: Optional[Callable[[], None]] = None) -> None:
-        for tensor in tensors:
-            assert tensor.storage().size() > 0
-        key = str(hash(tuple(tensors)))
+    def async_writev(self, arrays: List[np.ndarray], callback: Optional[Callable[[], None]] = None) -> List[np.ndarray]:
+        # for tensor in tensors:
+        #     assert tensor.storage().size() > 0
+        for array in arrays:
+            assert array.size > 0
+        data_ptr_list = list(map(lambda array: array.__array_interface__['data'][0], arrays))
+        array_info_list = list(map(lambda array: ArrayInfo(array), arrays))
+        nbytes_list = list(map(lambda array_info: array_info.nbytes, array_info_list))
+            
+        # key = str(hash(tuple(arrays))) # np.ndarray는 unhashable type 이므로 이렇게 하면 안됨.
+        key = str(hash(tuple(map(lambda array: id(array), arrays)))) # 의외로 얼마 안걸림. 원래꺼보다 빠름.
+        self.arrays_key_infos_dict[key] = array_info_list
 
         def callback_fn():
-            for tensor in tensors:
-                tensor.storage().resize_(0)
+            # for tensor in tensors:
+            #     tensor.storage().resize_(0)
+            for array in arrays:
+                array.resize(0, refcheck=False)
             if callback is not None:
                 callback()
-        super().async_writev(tensors, key, callback_fn)
+        super().async_writev(data_ptr_list, nbytes_list, key, callback_fn)
+        
+        return arrays
 
-    def async_readv(self, tensors: List[torch.Tensor], callback: Optional[Callable[[], None]] = None) -> None:
-        for tensor in tensors:
-            if tensor.storage().size() == 0:
-                tensor.storage().resize_(tensor.numel())
-        key = str(hash(tuple(tensors)))
-        super().async_readv(tensors, key, callback)
+    def async_readv(self, arrays: List[np.ndarray], callback: Optional[Callable[[], None]] = None) -> List[np.ndarray]:
+        # for tensor in tensors:
+        #     if tensor.storage().size() == 0:
+        #         tensor.storage().resize_(tensor.numel())
+        
+        key = str(hash(tuple(map(lambda array: id(array), arrays))))
+        array_info_list = self.arrays_key_infos_dict[key]
+        
+        nbytes_list = list(map(lambda array_info: array_info.nbytes, array_info_list))
 
-    def sync_writev(self, tensors: List[torch.Tensor]) -> None:
-        for tensor in tensors:
-            assert tensor.storage().size() > 0
-        key = str(hash(tuple(tensors)))
-        super().sync_writev(tensors, key)
-        for tensor in tensors:
-            tensor.storage().resize_(0)
+        for array, array_info in zip(arrays, array_info_list):
+            if array.size == 0:
+                array.resize(array_info.shape, refcheck=False)
+        
+        data_ptr_list = list(map(lambda array: array.__array_interface__['data'][0], arrays))
+                
+        super().async_readv(data_ptr_list, nbytes_list, key, callback)
+        
+        return arrays
 
-    def sync_readv(self, tensors: List[torch.Tensor]) -> None:
-        for tensor in tensors:
-            if tensor.storage().size() == 0:
-                tensor.storage().resize_(tensor.numel())
-        key = str(hash(tuple(tensors)))
-        super().sync_readv(tensors, key)
+    def sync_writev(self, arrays: List[np.ndarray]) -> List[np.ndarray]:
+        # for tensor in tensors:
+        #     assert tensor.storage().size() > 0
+        
+        for array in arrays:
+            assert array.size > 0
+            
+        data_ptr_list = list(map(lambda array: array.__array_interface__['data'][0], arrays))
+        array_info_list = list(map(lambda array: ArrayInfo(array), arrays))
+        nbytes_list = list(map(lambda array_info: array_info.nbytes, array_info_list))
+
+
+        key = str(hash(tuple(map(lambda array: id(array), arrays))))
+        self.arrays_key_infos_dict[key] = array_info_list
+        
+        super().sync_writev(data_ptr_list, nbytes_list, key)
+        # for tensor in tensors:
+        #     tensor.storage().resize_(0)
+        for array in arrays:
+            array.resize(0, refcheck=False)
+            
+        return arrays
+
+    def sync_readv(self, arrays: List[np.ndarray]) -> List[np.ndarray]:
+        # for tensor in tensors:
+        #     if tensor.storage().size() == 0:
+        #         tensor.storage().resize_(tensor.numel())
+        
+        key = str(hash(tuple(map(lambda array: id(array), arrays))))
+        array_info_list = self.arrays_key_infos_dict[key]
+        
+        nbytes_list = list(map(lambda array_info: array_info.nbytes, array_info_list))
+
+        for array, array_info in zip(arrays, array_info_list):
+            if array.size == 0:
+                array.resize(array_info.shape, refcheck=False)
+        
+        data_ptr_list = list(map(lambda array: array.__array_interface__['data'][0], arrays))
+
+        super().sync_readv(data_ptr_list, nbytes_list, key)
+        
+        return arrays

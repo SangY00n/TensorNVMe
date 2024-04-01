@@ -23,12 +23,12 @@ public:
     void sync_read_events();
     void synchronize();
     ~Offloader();
-    SpaceInfo prepare_writev(const std::vector<at::Tensor> &tensors, const std::string &key);
-    SpaceInfo prepare_readv(const std::vector<at::Tensor> &tensors, const std::string &key);
-    void async_writev(const std::vector<at::Tensor> &tensors, const std::string &key, callback_t callback = nullptr);
-    void async_readv(const std::vector<at::Tensor> &tensors, const std::string &key, callback_t callback = nullptr);
-    void sync_writev(const std::vector<at::Tensor> &tensors, const std::string &key);
-    void sync_readv(const std::vector<at::Tensor> &tensors, const std::string &key);
+    SpaceInfo prepare_writev(const std::vector<ull> &nbytes_list, const std::string &key);
+    SpaceInfo prepare_readv(const std::vector<ull> &nbytes_list, const std::string &key);
+    void async_writev(const std::vector<ull> &data_ptr_list, const std::vector<ull> &nbytes_list, const std::string &key, callback_t callback = nullptr);
+    void async_readv(const std::vector<ull> &data_ptr_list, const std::vector<ull> &nbytes_list, const std::string &key, callback_t callback = nullptr);
+    void sync_writev(const std::vector<ull> &data_ptr_list, const std::vector<ull> &nbytes_list, const std::string &key);
+    void sync_readv(const std::vector<ull> &data_ptr_list, const std::vector<ull> &nbytes_list, const std::string &key);
 private:
     const std::string filename;
     int fd;
