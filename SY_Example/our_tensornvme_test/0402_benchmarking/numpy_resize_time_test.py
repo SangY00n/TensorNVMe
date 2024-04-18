@@ -1,13 +1,16 @@
 import numpy as np
 import time
+from memory_profiler import profile
 
-
+@profile
 def test():
     x = np.empty(0, dtype=np.float32)
+    # y = np.empty(0, dtype=np.float32)
     print("x's data pointer: ", x.__array_interface__['data'][0])
 
     start_time = time.time()
     x.resize((1024,1024,1024), refcheck=False)
+    # y.resize((1024,1024,1024), refcheck=False)
     resize_time = time.time() - start_time
     print("time for resize: ", resize_time, " seconds")
     print("x's data pointer: ", x.__array_interface__['data'][0])

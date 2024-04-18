@@ -14,6 +14,10 @@
 #include "offload.h"
 #include "space_mgr.h"
 
+// #define _LARGEFILE_SOURCE
+// #define _LARGEFILE64_SOURCE
+// #define _FILE_OFFSET_BITS 64
+
 iovec *tensors_to_iovec(const std::vector<ull> &data_ptr_list, const std::vector<ull> &nbytes_list)
 {
     iovec *iovs = static_cast<iovec *>(calloc(data_ptr_list.size(), sizeof(iovec)));
@@ -140,7 +144,8 @@ AsyncIO *create_asyncio(unsigned int n_entries, const std::string &backend)
 Offloader::Offloader(const std::string &filename, unsigned int n_entries, const std::string &backend) : filename(filename), space_mgr(SpaceManager(0))
 {
     this->aio = create_asyncio(n_entries, backend);
-    this->fd = open(filename.c_str(), O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+    this->fd = open(filename.c_str(), O_RDWR | O_CREAT , S_IRUSR | S_IWUSR);
+    // this->fd = open(filename.c_str(), O_RDWR | O_CREAT | O_LARGEFILE, S_IRUSR | S_IWUSR); // O_LARGEFILE 넣어야 하나 했는데 안넣어도 되는 듯
     this->aio->register_file(fd); // liburing만 기반 aio인 경우만 register하고, libaio는 안함.
 }
 
@@ -192,24 +197,26 @@ void Offloader::async_read(ull data_ptr, ull nbytes, const std::string &key, cal
 
 void Offloader::sync_write(ull data_ptr, ull nbytes, const std::string &key)
 {
-    // printf("data_ptr: %d\n", data_ptr);
     void *data_ptr_ = reinterpret_cast<void *>(data_ptr);
-    // printf("data_ptr_: %p\n", data_ptr_);
     ull offset, bytes;
     std::tie(offset, bytes) = prepare_write(nbytes, key);
     lseek(this->fd, offset, SEEK_SET);
     write(this->fd, data_ptr_, bytes);
+    // lseek64(this->fd, offset, SEEK_SET);
+    // pwrite64(this->fd, data_ptr_, bytes, offset);
+
 }
 
 void Offloader::sync_read(ull data_ptr, ull nbytes, const std::string &key)
 {
-    // printf("data_ptr: %d\n", data_ptr);
     void *data_ptr_ = reinterpret_cast<void *>(data_ptr);
-    // printf("data_ptr_: %p\n", data_ptr_);
     ull offset, bytes;
     std::tie(offset, bytes) = prepare_read(nbytes, key);
     lseek(this->fd, offset, SEEK_SET);
     read(this->fd, data_ptr_, bytes);
+    // lseek64(this->fd, offset, SEEK_SET);
+    // pread64(this->fd, data_ptr_, bytes, offset);
+
     release(offset, bytes);
 }
 
@@ -299,6 +306,9 @@ void Offloader::sync_writev(const std::vector<ull> &data_ptr_list, const std::ve
     iovec *iov = tensors_to_iovec(data_ptr_list, nbytes_list);
     lseek(this->fd, offset, SEEK_SET);
     writev(this->fd, iov, data_ptr_list.size());
+    // lseek64(this->fd, offset, SEEK_SET);
+    // pwritev64(this->fd, iov, data_ptr_list.size(), offset);
+
     delete iov;
 }
 
@@ -309,6 +319,9 @@ void Offloader::sync_readv(const std::vector<ull> &data_ptr_list, const std::vec
     iovec *iov = tensors_to_iovec(data_ptr_list, nbytes_list);
     lseek(this->fd, offset, SEEK_SET);
     readv(this->fd, iov, data_ptr_list.size());
+    // lseek64(this->fd, offset, SEEK_SET);
+    // preadv64(this->fd, iov, data_ptr_list.size(), offset);
+
     delete iov;
 }
 

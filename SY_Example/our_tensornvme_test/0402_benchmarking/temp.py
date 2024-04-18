@@ -9,54 +9,57 @@ import time
 
 from tensornvme import DiskOffloader
 
+import copy
+
 new_rng = jpr.PRNGKey(0)
 
+@profile
 def test(offloader, shape):
+    xs=[jpr.normal(new_rng, shape=shape, dtype=np.float32) for _ in range(10)]
+    ys = copy.deepcopy(xs)
+    ys = np.asarray(ys)
     
-    
-    
-    # jax array 생성해서 offloading 한 상태로 list xs에 저장
-    xs=[]
-    for _ in range(10):
-        x = jpr.normal(new_rng, shape=shape, dtype=np.float32)
-        x = offloader.sync_write(x)
-        xs.append(x)
-    
-    total_start_time = time.time()
-    
-    xs[0] = offloader.sync_read(xs[0])
-
-    for i in range(len(xs)):        
-        offloader.sync_write_events()
+    start_time = time.time()
+    for i in range(5):
         xs[i] = offloader.async_write(xs[i])
-        
-        offloader.sync_read_events()
-        if i+1 < len(xs):
-            xs[i+1] = offloader.async_read(xs[i+1])
-        
-        
-    offloader.synchronize()
+        offloader.synchronize()
+        print(f"xs[{i}] is offloaded... sleep 5 seconds...")
+        # time.sleep(5)
+    print("time for offloading: ", time.time() - start_time, " seconds")
     
-    total_time = time.time() - total_start_time
+    start_time = time.time()
+    for i in range(5):
+        xs[i] = offloader.async_read(xs[i])
+        offloader.synchronize()
+        print(f"xs[{i}] is restored... sleep 5 seconds...")
+        # time.sleep(5)
+    print("time for restoring: ", time.time() - start_time, " seconds")
+    
+    start_time = time.time()
+    for i in range(5):
+        xs[i+5] = offloader.async_write(xs[i+5])
+        offloader.synchronize()
+        print(f"xs[{i+5}] is offloaded... sleep 5 seconds...")
+        # time.sleep(5)
+    print("time for offloading: ", time.time() - start_time, " seconds")
+    
+    start_time = time.time()
+    for i in range(5):
+        xs[i+5] = offloader.async_read(xs[i+5])
+        offloader.synchronize()
+        print(f"xs[{i+5}] is restored... sleep 5 seconds...")
+        # time.sleep(5)
+    print("time for restoring: ", time.time() - start_time, " seconds")
+    
+    print(np.allclose(xs, ys))
     
     
-    return total_time
+    
 
-def main():
-    # 반복횟수 변수
-    repeat = 1
-    
+def main():    
     offloader = DiskOffloader('./offload')
-    # for shape in [(1, 1024, 1024, 1024), (2, 1024, 1024, 1024), (4, 1024, 1024, 1024)]:
-    for shape in [(1, 1024, 1024, 1024)]:
-        acc_total_time = 0
-        for i in range(repeat):
-            total_time = test(offloader, shape)
-            acc_total_time += total_time
-        average_total_time = acc_total_time / repeat
-        
-        print(f"shape: {shape}, dtype: float32, size: {np.prod(shape) * 4 / 1024 / 1024} MB")   
-        print(f"total_time: {average_total_time} seconds")
+    for shape in [(256, 1024, 1024)]:
+        test(offloader, shape)
         
 if __name__ == "__main__":
     main()
