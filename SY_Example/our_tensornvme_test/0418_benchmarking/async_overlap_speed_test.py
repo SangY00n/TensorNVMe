@@ -6,42 +6,45 @@ import jax
 from jax import numpy as jnp
 from jax import random as jpr  # JAX용 random 모듈을 임포트
 import time
+import copy
 
 from tensornvme import DiskOffloader
 
 new_rng = jpr.PRNGKey(0)
+array_num = 10
 
-def test(offloader, shape):
-    
-    
-    
-    # jax array 생성해서 offloading 한 상태로 list xs에 저장
+@profile
+def test(offloader, shape):    
     xs=[]
-    for _ in range(10):
+    for _ in range(array_num):
         x = jpr.normal(new_rng, shape=shape, dtype=np.float32)
         x = offloader.sync_write(x)
         xs.append(x)
     
-    i_time_list = []
+    read_time_list = []
+    write_time_list = []
     total_start_time = time.time()
     
     xs[0] = offloader.sync_read(xs[0])
-    cur_time = time.time()
-    i_time_list.append(cur_time-total_start_time)
-    pre_time = cur_time
+    read_cur_time = time.time()
+    read_time_list.append(read_cur_time-total_start_time)
+    read_pre_time = time.time()
     for i in range(len(xs)):
-        cur_time = time.time()
-        # i_time_list.append(cur_time-pre_time)
-        pre_time = cur_time
-        
         offloader.sync_write_events()
+        if i>0:
+            write_cur_time = time.time()
+            write_time_list.append(write_cur_time-write_pre_time)
+            write_pre_time = time.time()
+        else:
+            write_pre_time = time.time()
         xs[i] = offloader.async_write(xs[i])
         
-        cur_time = time.time()
-        i_time_list.append(cur_time-pre_time)
-        pre_time = cur_time
         
         offloader.sync_read_events()
+        if i>0:
+            read_cur_time = time.time()
+            read_time_list.append(read_cur_time-read_pre_time)
+            read_pre_time = time.time()
         if i+1 < len(xs):
             xs[i+1] = offloader.async_read(xs[i+1])
         
@@ -49,16 +52,18 @@ def test(offloader, shape):
     offloader.synchronize()
     
     total_time = time.time() - total_start_time
+    print("Total time: ", total_time)
     
-    print("i_time_list: ", i_time_list)
+    print("read_time_list: ", read_time_list)
+    print("write_time_list: ", write_time_list)
     
     return total_time
 
 def main():
     offloader = DiskOffloader('./offload')
     
-    repeat = 10
-    shape = (256, 1024, 1024)
+    repeat = 1
+    shape = (256, 1024, 1024) # 256*1024*1024 * 4bytes = 1GB size
     
     acc_total_time = 0
     for i in range(repeat):
