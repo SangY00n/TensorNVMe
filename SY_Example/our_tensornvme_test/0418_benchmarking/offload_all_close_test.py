@@ -25,7 +25,11 @@ def test(offloader, shape):
     
     
     for i in range(array_num):
-        xs[i] = offloader.sync_read(xs[i])
+        xs[i] = offloader.async_read(xs[i])
+    
+    offloader.synchronize()
+        
+    
     
     print("xs[0]'s shape", xs[0].shape)
     print("ys[0]'s shape", ys[0].shape)
@@ -35,6 +39,7 @@ def main():
     offloader = DiskOffloader('./offload')
     
     shape = (256, 1024, 1024) # 256*1024*1024 * 4bytes = 1GB size
+    # shape = (10,20,30)
     
     test(offloader, shape)
     

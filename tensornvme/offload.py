@@ -45,97 +45,78 @@ class DiskOffloader(Offloader):
         while os.path.exists(filename):
             filename = os.path.join(dir_name, f'offload-{uuid.uuid4().hex}')
             
+        
+        self._key_counter = 0
         self.array_id_info_dict: Dict[int, ArrayInfo] = {}
         self.arrays_key_infos_dict: Dict[str, List[ArrayInfo]] = {}
             
         super().__init__(filename, n_entries, backend)
+        
+    def key_generator(self) -> int:
+        new_key = self._key_counter
+        self._key_counter += 1
+        return new_key
 
-    def async_write(self, array: Union[np.ndarray, jaxarray], callback: Optional[Callable[[], None]] = None) -> np.ndarray:
-        # assert tensor.storage().size() > 0
+    def async_write(self, array: Union[np.ndarray, jaxarray], callback: Optional[Callable[[], None]] = None) -> int:
         assert array.size > 0
         
-        is_readonly_array = False
         if not isinstance(array, np.ndarray): # if isinstance(array, jaxarray)
             array = np.asarray(array)
-            is_readonly_array = array.__array_interface__['data'][1] # True
             # array가 jax array인 경우 np.ndarray 로 바꿔줌 (copy x, 버퍼 공유)
             # jax array에 대한 메모리 할당 해제 및 garbage collection은 외부에서 사용자가 직접 해줘야 함.
             
         data_ptr = array.__array_interface__['data'][0]
         array_info = ArrayInfo(array)
         
-        if is_readonly_array:
-            array = np.empty(0, dtype=array.dtype) # empty array with the same dtype => return 해주고 나중에 read로 데이터 찾기 위함.
-        self.array_id_info_dict[id(array)] = array_info
+        
+        key = self.key_generator()
+        self.array_id_info_dict[key] = array_info
 
         def callback_fn():
-            # tensor.storage().resize_(0)
-            if not is_readonly_array:
-                array.resize(0, refcheck=False)
-            else:
-                pass
             if callback is not None:
                 callback()
                 
-        super().async_write(data_ptr, array_info.nbytes, str(id(array)), callback_fn)
+        super().async_write(data_ptr, array_info.nbytes, str(key), callback_fn)
+        
+        return key
+
+    def async_read(self, key: int, callback: Optional[Callable[[], None]] = None) -> np.ndarray:        
+        array_info = self.array_id_info_dict[key]
+        
+        def callback_fn():
+            if callback is not None:
+                callback()
+            
+        array = super().async_read(array_info.nbytes, str(key), callback_fn)
+        array.resize(array_info.shape, refcheck=False)
         
         return array
 
-    def async_read(self, array: np.ndarray, callback: Optional[Callable[[], None]] = None) -> np.ndarray:
-        # if tensor.storage().size() == 0:
-        #     tensor.storage().resize_(tensor.numel())
-        
-        array_info = self.array_id_info_dict[id(array)]
-        if array.size == 0:
-            array.resize(array_info.shape, refcheck=False)
-            
-        data_ptr = array.__array_interface__['data'][0]
-            
-        super().async_read(data_ptr, array_info.nbytes, str(id(array)), callback)
-        
-        return array
-
-    def sync_write(self, array: Union[np.ndarray, jaxarray]) -> np.ndarray:
-        # assert tensor.storage().size() > 0
-        
+    def sync_write(self, array: Union[np.ndarray, jaxarray]) -> int:        
         assert array.size > 0
         
-        is_readonly_array = False
         if not isinstance(array, np.ndarray): # if isinstance(array, jaxarray)
             array = np.asarray(array)
-            is_readonly_array = array.__array_interface__['data'][1] # True
             # array가 jax array인 경우 np.ndarray 로 바꿔줌 (copy x, 버퍼 공유)
             # jax array에 대한 메모리 할당 해제 및 garbage collection은 외부에서 사용자가 직접 해줘야 함.
         
         data_ptr = array.__array_interface__['data'][0]
         array_info = ArrayInfo(array)
         
-        if is_readonly_array:
-            array = np.empty(0, dtype=array.dtype) # empty array with the same dtype => return 해주고 나중에 read로 데이터 찾기 위함.
-        self.array_id_info_dict[id(array)] = array_info
         
-        super().sync_write(data_ptr, array_info.nbytes, str(id(array)))
+        key = self.key_generator()
+        self.array_id_info_dict[key] = array_info
         
-        # tensor.storage().resize_(0)
-        if not is_readonly_array:
-            array.resize(0, refcheck=False)
-        else:
-            pass
+        super().sync_write(data_ptr, array_info.nbytes, str(key))
         
-        return array
+        return key
             
 
-    def sync_read(self, array: np.ndarray) -> np.ndarray:
-        # if tensor.storage().size() == 0:
-        #     tensor.storage().resize_(tensor.numel())
+    def sync_read(self, key: int) -> np.ndarray:        
+        array_info = self.array_id_info_dict[key]
         
-        array_info = self.array_id_info_dict[id(array)]
-        if array.size == 0:
-            array.resize(array_info.shape, refcheck=False)
-        
-        data_ptr = array.__array_interface__['data'][0]
-            
-        super().sync_read(data_ptr, array_info.nbytes, str(id(array)))
+        array = super().sync_read(array_info.nbytes, str(key))
+        array.resize(array_info.shape, refcheck=False)
         
         return array
 

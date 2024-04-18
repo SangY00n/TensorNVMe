@@ -8,6 +8,10 @@
 #ifndef DISABLE_AIO
 #include "aio.h"
 #endif
+#include <pybind11/pybind11.h>
+#include <pybind11/numpy.h>
+
+namespace py = pybind11;
 
 class Offloader
 {
@@ -16,9 +20,9 @@ public:
     SpaceInfo prepare_write(const ull nbytes, const std::string &key);
     SpaceInfo prepare_read(const ull nbytes, const std::string &key);
     void async_write(ull data_ptr, ull nbytes, const std::string &key, callback_t callback = nullptr);
-    void async_read(ull data_ptr, ull nbytes, const std::string &key, callback_t callback = nullptr);
+    py::array_t<float> async_read(ull nbytes, const std::string &key, callback_t callback = nullptr);
     void sync_write(ull data_ptr, ull nbytes, const std::string &key);
-    void sync_read(ull data_ptr, ull nbytes, const std::string &key);
+    py::array_t<float> sync_read(ull nbytes, const std::string &key);
     void sync_write_events();
     void sync_read_events();
     void synchronize();

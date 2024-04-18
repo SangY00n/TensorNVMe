@@ -10,9 +10,12 @@
 #include <error.h>
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/numpy.h>
 #include <sys/uio.h>
 #include "offload.h"
 #include "space_mgr.h"
+
+namespace py = pybind11;
 
 // #define _LARGEFILE_SOURCE
 // #define _LARGEFILE64_SOURCE
@@ -184,15 +187,26 @@ void Offloader::async_write(ull data_ptr, ull nbytes, const std::string &key, ca
     this->aio->get_event(NOWAIT);
 }
 
-void Offloader::async_read(ull data_ptr, ull nbytes, const std::string &key, callback_t callback)
+py::array_t<float> Offloader::async_read(ull nbytes, const std::string &key, callback_t callback)
 {
-    void *data_ptr_ = reinterpret_cast<void *>(data_ptr);
+    void *data_ptr_ = (void *) malloc(nbytes);
+    if (data_ptr_ == NULL)
+        throw std::runtime_error("Memory allocation failed for read array");
+    auto result_array = py::array_t<float>(
+        {nbytes / sizeof(float)}, // shape
+        {sizeof(float)}, // strides
+        (float *)data_ptr_, // data pointer
+        py::none() // owner, None implies data is not owned by Python
+    );
+
     ull offset, bytes;
     std::tie(offset, bytes) = prepare_read(nbytes, key);
     auto fn = std::bind(&Offloader::release, this, offset, bytes, callback);
     this->aio->read(this->fd, data_ptr_, bytes, offset, fn);
 
     this->aio->get_event(NOWAIT);
+
+    return result_array;
 }
 
 void Offloader::sync_write(ull data_ptr, ull nbytes, const std::string &key)
@@ -207,9 +221,18 @@ void Offloader::sync_write(ull data_ptr, ull nbytes, const std::string &key)
 
 }
 
-void Offloader::sync_read(ull data_ptr, ull nbytes, const std::string &key)
+py::array_t<float> Offloader::sync_read(ull nbytes, const std::string &key)
 {
-    void *data_ptr_ = reinterpret_cast<void *>(data_ptr);
+    void *data_ptr_ = (void *) malloc(nbytes);
+    if (data_ptr_ == NULL)
+        throw std::runtime_error("Memory allocation failed for read array");
+    auto result_array = py::array_t<float>(
+        {nbytes / sizeof(float)}, // shape
+        {sizeof(float)}, // strides
+        (float *)data_ptr_, // data pointer
+        py::none() // owner, None implies data is not owned by Python
+    );
+
     ull offset, bytes;
     std::tie(offset, bytes) = prepare_read(nbytes, key);
     lseek(this->fd, offset, SEEK_SET);
@@ -218,6 +241,8 @@ void Offloader::sync_read(ull data_ptr, ull nbytes, const std::string &key)
     // pread64(this->fd, data_ptr_, bytes, offset);
 
     release(offset, bytes);
+
+    return result_array;
 }
 
 void Offloader::sync_write_events()
@@ -332,16 +357,14 @@ void Offloader::release(ull offset, ull bytes, callback_t callback)
         callback();
 }
 
-namespace py = pybind11;
-
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
     py::class_<Offloader>(m, "Offloader")
         .def(py::init<const std::string &, unsigned int, const std::string &>(), py::arg("filename"), py::arg("n_entries"), py::arg("backend") = "uring")
         .def("async_write", &Offloader::async_write, py::arg("data_ptr"), py::arg("nbytes"), py::arg("key"), py::arg("callback") = py::none())
-        .def("async_read", &Offloader::async_read, py::arg("data_ptr"), py::arg("nbytes"), py::arg("key"), py::arg("callback") = py::none())
+        .def("async_read", &Offloader::async_read, py::arg("nbytes"), py::arg("key"), py::arg("callback") = py::none())
         .def("sync_write", &Offloader::sync_write, py::arg("data_ptr"), py::arg("nbytes"), py::arg("key"))
-        .def("sync_read", &Offloader::sync_read, py::arg("data_ptr"), py::arg("nbytes"), py::arg("key"))
+        .def("sync_read", &Offloader::sync_read, py::arg("nbytes"), py::arg("key"))
         .def("sync_write_events", &Offloader::sync_write_events)
         .def("sync_read_events", &Offloader::sync_write_events)
         .def("synchronize", &Offloader::synchronize)
