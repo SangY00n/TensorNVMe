@@ -1,6 +1,7 @@
 #include <stdexcept>
 #include "space_mgr.h"
 #include <stdio.h>
+#include <cstdlib>
 
 SpaceManager::SpaceManager(unsigned long long limit) : limit(limit), used_bytes(0)
 {
@@ -82,6 +83,97 @@ void SpaceManager::print()
     for (auto iter = avail_spaces.begin(); iter != avail_spaces.end(); iter++)
     {
         printf(", [%lld, %lld)", iter->first, iter->second);
+    }
+    printf("\n");
+}
+
+
+
+MemoryPoolManager::MemoryPoolManager(ull limit) : limit(limit), used_bytes(0)
+{
+    this->memory_pool = malloc(limit);
+}
+
+MemoryPoolManager::~MemoryPoolManager()
+{
+    free(this->memory_pool);
+}
+
+void *MemoryPoolManager::memorypool_alloc(ull bytes)
+{
+    if (bytes == 0)
+        throw std::runtime_error("Invalid alloc size (0)");
+    auto target_iter = avail_mem_pools.end();
+    ull target_bytes = 0;
+    for (auto iter = avail_mem_pools.begin(); iter != avail_mem_pools.end(); iter++)
+    {
+        if (iter->second >= bytes && (target_iter == avail_mem_pools.end() || iter->second < target_bytes))
+        {
+            target_iter = iter;
+            target_bytes = iter->second;
+        }
+    }
+    // no available space, use new space
+    if (target_iter == avail_mem_pools.end())
+    {
+        if (limit - used_bytes < bytes)
+            throw std::runtime_error("Memory pool size exceed limit");
+        void *ptr = this->memory_pool + used_bytes;
+        used_bytes += bytes;
+        used_mem_pools.push_back(MemoryPoolInfo(ptr, bytes));
+        return ptr;
+    }
+    void *ptr = target_iter->first;
+    target_iter->first = (void *)((char *)target_iter->first + bytes);
+    target_iter->second -= bytes;
+    if (target_iter->second == 0)
+        avail_mem_pools.erase(target_iter);
+    used_mem_pools.push_back(MemoryPoolInfo(ptr, bytes));
+    return ptr;
+}
+
+void MemoryPoolManager::memorypool_free(void *ptr, ull bytes)
+{
+    if (bytes == 0)
+        throw std::runtime_error("Invalid free size (0)");
+    MemoryPoolInfo new_avail_mem_pool(ptr, bytes);
+    for (auto iter = avail_mem_pools.begin(); iter != avail_mem_pools.end();)
+    {
+        if (ptr > iter->first && (char *)ptr - (char *)iter->first == iter->second)
+        {
+            new_avail_mem_pool.first = iter->first;
+            new_avail_mem_pool.second += iter->second;
+            iter = avail_mem_pools.erase(iter);
+        }
+        else if (ptr < iter->first && (char *)iter->first - (char *)ptr == bytes)
+        {
+            new_avail_mem_pool.second += iter->second;
+            iter = avail_mem_pools.erase(iter);
+        }
+        else
+        {
+            iter++;
+        }
+    }
+    avail_mem_pools.push_back(new_avail_mem_pool);
+    
+    for (auto iter = used_mem_pools.begin(); iter != used_mem_pools.end();)
+    {
+        if (iter->first == ptr)
+        {
+            used_mem_pools.erase(iter);
+            break;
+        }
+        iter++;
+    }
+}
+
+void MemoryPoolManager::print()
+{
+    printf("Used MemoryPool bytes: %lld", used_bytes);
+    for (auto iter = avail_mem_pools.begin(); iter != avail_mem_pools.end(); iter++)
+    {
+        printf(", [%p, %lld)", iter->first, iter->second);
     }
     printf("\n");
 }

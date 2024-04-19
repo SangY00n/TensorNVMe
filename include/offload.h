@@ -33,12 +33,15 @@ public:
     void async_readv(const std::vector<ull> &data_ptr_list, const std::vector<ull> &nbytes_list, const std::string &key, callback_t callback = nullptr);
     void sync_writev(const std::vector<ull> &data_ptr_list, const std::vector<ull> &nbytes_list, const std::string &key);
     void sync_readv(const std::vector<ull> &data_ptr_list, const std::vector<ull> &nbytes_list, const std::string &key);
+
+    void memory_free(py::array_t<float> array);
 private:
     const std::string filename;
     int fd;
     AsyncIO *aio;
     SpaceManager space_mgr;
     std::unordered_map<std::string, SpaceInfo> tensors_info;
+    MemoryPoolManager mem_pool_mgr;
 
     void release(ull offset, ull bytes, callback_t callback = nullptr);
 };

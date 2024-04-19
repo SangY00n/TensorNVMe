@@ -144,7 +144,7 @@ AsyncIO *create_asyncio(unsigned int n_entries, const std::string &backend)
     throw std::runtime_error("Unsupported backend: " + backend);
 }
 
-Offloader::Offloader(const std::string &filename, unsigned int n_entries, const std::string &backend) : filename(filename), space_mgr(SpaceManager(0))
+Offloader::Offloader(const std::string &filename, unsigned int n_entries, const std::string &backend) : filename(filename), space_mgr(SpaceManager(0)), mem_pool_mgr(MemoryPoolManager((ull)(16*1024)*(ull)(1024*1024)))
 {
     this->aio = create_asyncio(n_entries, backend);
     this->fd = open(filename.c_str(), O_RDWR | O_CREAT , S_IRUSR | S_IWUSR);
@@ -189,9 +189,10 @@ void Offloader::async_write(ull data_ptr, ull nbytes, const std::string &key, ca
 
 py::array_t<float> Offloader::async_read(ull nbytes, const std::string &key, callback_t callback)
 {
-    void *data_ptr_ = (void *) malloc(nbytes);
-    if (data_ptr_ == NULL)
-        throw std::runtime_error("Memory allocation failed for read array");
+    // void *data_ptr_ = (void *) malloc(nbytes);
+    // if (data_ptr_ == NULL)
+    //     throw std::runtime_error("Memory allocation failed for read array");
+    void *data_ptr_ = this->mem_pool_mgr.memorypool_alloc(nbytes);
     auto result_array = py::array_t<float>(
         {nbytes / sizeof(float)}, // shape
         {sizeof(float)}, // strides
@@ -223,9 +224,10 @@ void Offloader::sync_write(ull data_ptr, ull nbytes, const std::string &key)
 
 py::array_t<float> Offloader::sync_read(ull nbytes, const std::string &key)
 {
-    void *data_ptr_ = (void *) malloc(nbytes);
-    if (data_ptr_ == NULL)
-        throw std::runtime_error("Memory allocation failed for read array");
+    // void *data_ptr_ = (void *) malloc(nbytes);
+    // if (data_ptr_ == NULL)
+    //     throw std::runtime_error("Memory allocation failed for read array");
+    void *data_ptr_ = this->mem_pool_mgr.memorypool_alloc(nbytes);
     auto result_array = py::array_t<float>(
         {nbytes / sizeof(float)}, // shape
         {sizeof(float)}, // strides
@@ -357,6 +359,12 @@ void Offloader::release(ull offset, ull bytes, callback_t callback)
         callback();
 }
 
+void Offloader::memory_free(py::array_t<float> array)
+{
+    // float *ptr = static_cast<float *>(array.request().ptr);
+    // free(ptr);
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
 {
     py::class_<Offloader>(m, "Offloader")
@@ -371,7 +379,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
         .def("async_writev", &Offloader::async_writev, py::arg("data_ptr_list"), py::arg("nbytes_list"), py::arg("key"), py::arg("callback") = py::none())
         .def("async_readv", &Offloader::async_readv, py::arg("data_ptr_list"), py::arg("nbytes_list"), py::arg("key"), py::arg("callback") = py::none())
         .def("sync_writev", &Offloader::sync_writev, py::arg("data_ptr_list"), py::arg("nbytes_list"), py::arg("key"))
-        .def("sync_readv", &Offloader::sync_readv, py::arg("data_ptr_list"), py::arg("nbytes_list"), py::arg("key"));
+        .def("sync_readv", &Offloader::sync_readv, py::arg("data_ptr_list"), py::arg("nbytes_list"), py::arg("key"))
+        .def("memory_free", &Offloader::memory_free, py::arg("array"));
     m.def("get_backends", get_backends);
     m.def("probe_backend", probe_backend, py::arg("backend"));
 }
